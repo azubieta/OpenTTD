@@ -1,0 +1,83 @@
+# This is a basic workflow to help you get started with Actions
+
+name: AppImage CI
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  pack:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-20.04
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig-dev \
+            libicu-dev \
+            liblzma-dev \
+            liblzo2-dev \
+            libsdl1.2-dev \
+            libsdl2-dev \
+            libxdg-basedir-dev \
+            zlib1g-dev \
+            # EOF
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout
+        uses: actions/checkout@v2
+      
+      - name: Build
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
+          make -j`nproc`
+
+      - name: Deploy binaries and resources
+        run: |
+          cd build
+          make install -j$(nproc) DESTDIR=AppDir
+          mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
+          cp ../media/openttd.svg AppDir/usr/share/icons/hicolor/scalable/apps
+          curl -L https://cdn.openttd.org/opengfx-releases/0.6.0/opengfx-0.6.0-all.zip -o opengfx.zip
+          unzip opengfx.zip -d AppDir/usr/share/games/openttd/baseset
+          curl -L https://cdn.openttd.org/openmsx-releases/0.3.1/openmsx-0.3.1-all.zip -o openmsx.zip
+          unzip openmsx.zip -d AppDir/usr/share/games/openttd/baseset
+          curl -L https://cdn.openttd.org/opensfx-releases/0.2.3/opensfx-0.2.3-all.zip -o opensfx.zip
+          unzip opensfx.zip -d AppDir/usr/share/games/openttd/baseset
+
+      - name: Deploy dependencies
+        uses: AppImageCrafters/build-appimage-action@2b38af34ce2ad5464335f3eebc678223fc26a3bf
+        with:
+          recipe: os/linux/appimage.yml
+          args: --skip-test --skip-appimage
+      
+      - name: Patch timidity
+        run: echo "source /etc/timidity/freepats.cfg" | sudo tee build/AppDir/etc/timidity/timidity.cfg
+
+      - name: Create AppImage
+        uses: AppImageCrafters/build-appimage-action@2b38af34ce2ad5464335f3eebc678223fc26a3bf
+        with:
+          recipe: os/linux/appimage.yml
+          args: --skip-test --skip-script --skip-build
+      
+      - name: Release In-Development AppImage
+        uses: marvinpinto/action-automatic-releases@latest
+
+        with:
+          title: Latest
+          automatic_release_tag: 'latest'
+          prerelease: true
+          draft: false
+          files: ./*.AppImage*
+          repo_token: ${{ secrets.GITHUB_TOKEN }}

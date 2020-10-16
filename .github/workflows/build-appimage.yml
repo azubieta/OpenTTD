@@ -1,0 +1,71 @@
+name: AppImage CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  pack:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig-dev \
+            libicu-dev \
+            liblzma-dev \
+            liblzo2-dev \
+            libsdl1.2-dev \
+            libsdl2-dev \
+            libxdg-basedir-dev \
+            zlib1g-dev \
+            # EOF
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Build
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
+          make -j`nproc`
+
+      - name: Deploy binaries and resources
+        run: |
+          cd build
+          make install -j$(nproc) DESTDIR=AppDir
+          mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
+          cp ../media/openttd.svg AppDir/usr/share/icons/hicolor/scalable/apps
+          curl -L https://cdn.openttd.org/opengfx-releases/0.6.0/opengfx-0.6.0-all.zip -o opengfx.zip
+          unzip opengfx.zip -d AppDir/usr/share/games/openttd/baseset
+          curl -L https://cdn.openttd.org/openmsx-releases/0.3.1/openmsx-0.3.1-all.zip -o openmsx.zip
+          unzip openmsx.zip -d AppDir/usr/share/games/openttd/baseset
+          curl -L https://cdn.openttd.org/opensfx-releases/0.2.3/opensfx-0.2.3-all.zip -o opensfx.zip
+          unzip opensfx.zip -d AppDir/usr/share/games/openttd/baseset
+
+      - name: Deploy dependencies
+        uses: AppImageCrafters/build-appimage-action@v1.1
+        with:
+          recipe: os/linux/appimage-builder.yml
+          args: --skip-test --skip-appimage
+
+      # appimage-builder doesn't support patching the deployed files yet therefore we must split it's execution
+      # and patch it manually. This feature can be tracked at https://github.com/AppImageCrafters/appimage-builder/issues/50
+      - name: Patch timidity
+        run: echo "source /etc/timidity/freepats.cfg" | sudo tee build/AppDir/etc/timidity/timidity.cfg
+
+      - name: Create AppImage
+        uses: AppImageCrafters/build-appimage-action@v1.1
+        with:
+          recipe: os/linux/appimage-builder.yml
+          args: --skip-test --skip-script --skip-build
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: AppImage
+          path: ./*.AppImage

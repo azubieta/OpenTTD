@@ -35,6 +35,8 @@ function(set_directory_options)
         set(GLOBAL_DIR "${DEFAULT_GLOBAL_DIR}" CACHE STRING "Global directory")
         message(STATUS "Detecting Global Data directory - ${GLOBAL_DIR}")
     endif()
+
+    set(HOST_BINARY_DIR "" CACHE PATH "Full path to native cmake build directory")
 endfunction()
 
 # Set some generic options that influence what is being build.
@@ -42,7 +44,9 @@ endfunction()
 # set_options()
 #
 function(set_options)
-    if(UNIX AND NOT APPLE)
+    option(OPTION_PACKAGE_DEPENDENCIES "Copy dependencies into lib/ for easy packaging (Linux only)" OFF)
+
+    if(UNIX AND NOT APPLE AND NOT OPTION_PACKAGE_DEPENDENCIES)
         set(DEFAULT_OPTION_INSTALL_FHS ON)
     else()
         set(DEFAULT_OPTION_INSTALL_FHS OFF)
@@ -53,8 +57,20 @@ function(set_options)
     option(OPTION_DEDICATED "Build dedicated server only (no GUI)" OFF)
     option(OPTION_INSTALL_FHS "Install with Filesystem Hierarchy Standard folders" ${DEFAULT_OPTION_INSTALL_FHS})
     option(OPTION_USE_ASSERTS "Use assertions; leave enabled for nightlies, betas, and RCs" ON)
-    option(OPTION_USE_THREADS "Use threads" ON)
+    if(EMSCRIPTEN)
+        # Although pthreads is supported, it is not in a way yet that is
+        # useful for us.
+        option(OPTION_USE_THREADS "Use threads" OFF)
+    else()
+        option(OPTION_USE_THREADS "Use threads" ON)
+    endif()
     option(OPTION_USE_NSIS "Use NSIS to create windows installer; enable only for stable releases" OFF)
+    option(OPTION_TOOLS_ONLY "Build only tools target" OFF)
+    option(OPTION_DOCS_ONLY "Build only docs target" OFF)
+
+    if (OPTION_DOCS_ONLY)
+        set(OPTION_TOOLS_ONLY ON PARENT_SCOPE)
+    endif()
 endfunction()
 
 # Show the values of the generic options.
@@ -62,6 +78,7 @@ endfunction()
 # show_options()
 #
 function(show_options)
+    message(STATUS "Option Package Dependencies - ${OPTION_PACKAGE_DEPENDENCIES}")
     message(STATUS "Option Dedicated - ${OPTION_DEDICATED}")
     message(STATUS "Option Install FHS - ${OPTION_INSTALL_FHS}")
     message(STATUS "Option Use assert - ${OPTION_USE_ASSERTS}")

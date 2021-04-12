@@ -28,6 +28,10 @@
 #include <SDL.h>
 #endif
 
+#ifdef __EMSCRIPTEN__
+#	include <emscripten.h>
+#endif
+
 #ifdef __APPLE__
 #	include <sys/mount.h>
 #elif (defined(_POSIX_VERSION) && _POSIX_VERSION >= 200112L) || defined(__GLIBC__)
@@ -142,9 +146,8 @@ static const char *GetLocalCode()
  * Convert between locales, which from and which to is set in the calling
  * functions OTTD2FS() and FS2OTTD().
  */
-static const char *convert_tofrom_fs(iconv_t convd, const char *name)
+static const char *convert_tofrom_fs(iconv_t convd, const char *name, char *outbuf, size_t outlen)
 {
-	static char buf[1024];
 	/* There are different implementations of iconv. The older ones,
 	 * e.g. SUSv2, pass a const pointer, whereas the newer ones, e.g.
 	 * IEEE 1003.1 (2004), pass a non-const pointer. */
@@ -154,9 +157,8 @@ static const char *convert_tofrom_fs(iconv_t convd, const char *name)
 	const char *inbuf = name;
 #endif
 
-	char *outbuf  = buf;
-	size_t outlen = sizeof(buf) - 1;
 	size_t inlen  = strlen(name);
+	char *buf = outbuf;
 
 	strecpy(outbuf, name, outbuf + outlen);
 
@@ -175,9 +177,10 @@ static const char *convert_tofrom_fs(iconv_t convd, const char *name)
  * @param name pointer to a valid string that will be converted
  * @return pointer to a new stringbuffer that contains the converted string
  */
-const char *OTTD2FS(const char *name)
+std::string OTTD2FS(const std::string &name)
 {
 	static iconv_t convd = (iconv_t)(-1);
+	char buf[1024] = {};
 
 	if (convd == (iconv_t)(-1)) {
 		const char *env = GetLocalCode();
@@ -188,17 +191,18 @@ const char *OTTD2FS(const char *name)
 		}
 	}
 
-	return convert_tofrom_fs(convd, name);
+	return convert_tofrom_fs(convd, name.c_str(), buf, lengthof(buf));
 }
 
 /**
  * Convert to OpenTTD's encoding from that of the local environment
- * @param name pointer to a valid string that will be converted
+ * @param name valid string that will be converted
  * @return pointer to a new stringbuffer that contains the converted string
  */
-const char *FS2OTTD(const char *name)
+std::string FS2OTTD(const std::string &name)
 {
 	static iconv_t convd = (iconv_t)(-1);
+	char buf[1024] = {};
 
 	if (convd == (iconv_t)(-1)) {
 		const char *env = GetLocalCode();
@@ -209,12 +213,9 @@ const char *FS2OTTD(const char *name)
 		}
 	}
 
-	return convert_tofrom_fs(convd, name);
+	return convert_tofrom_fs(convd, name.c_str(), buf, lengthof(buf));
 }
 
-#else
-const char *FS2OTTD(const char *name) {return name;}
-const char *OTTD2FS(const char *name) {return name;}
 #endif /* WITH_ICONV */
 
 void ShowInfo(const char *str)
@@ -235,8 +236,8 @@ void ShowOSErrorBox(const char *buf, bool system)
 #endif
 
 #ifdef WITH_COCOA
-void cocoaSetupAutoreleasePool();
-void cocoaReleaseAutoreleasePool();
+void CocoaSetupAutoreleasePool();
+void CocoaReleaseAutoreleasePool();
 #endif
 
 int CDECL main(int argc, char *argv[])
@@ -245,7 +246,7 @@ int CDECL main(int argc, char *argv[])
 	for (int i = 0; i < argc; i++) ValidateString(argv[i]);
 
 #ifdef WITH_COCOA
-	cocoaSetupAutoreleasePool();
+	CocoaSetupAutoreleasePool();
 	/* This is passed if we are launched by double-clicking */
 	if (argc >= 2 && strncmp(argv[1], "-psn", 4) == 0) {
 		argv[1] = nullptr;
@@ -261,7 +262,7 @@ int CDECL main(int argc, char *argv[])
 	int ret = openttd_main(argc, argv);
 
 #ifdef WITH_COCOA
-	cocoaReleaseAutoreleasePool();
+	CocoaReleaseAutoreleasePool();
 #endif
 
 	return ret;
@@ -288,7 +289,13 @@ bool GetClipboardContents(char *buffer, const char *last)
 #endif
 
 
-#ifndef __APPLE__
+#if defined(__EMSCRIPTEN__)
+void OSOpenBrowser(const char *url)
+{
+	/* Implementation in pre.js */
+	EM_ASM({ if(window["openttd_open_url"]) window.openttd_open_url($0, $1) }, url, strlen(url));
+}
+#elif !defined( __APPLE__)
 void OSOpenBrowser(const char *url)
 {
 	pid_t child_pid = fork();

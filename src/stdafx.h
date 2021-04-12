@@ -85,6 +85,7 @@
 #	define INT8_MIN   (-INT8_MAX - 1)
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <cstddef>
 #include <cstring>
@@ -92,6 +93,7 @@
 #include <climits>
 #include <cassert>
 #include <memory>
+#include <string>
 
 #ifndef SIZE_MAX
 #	define SIZE_MAX ((size_t)-1)
@@ -111,7 +113,7 @@
 #endif
 
 /* Stuff for GCC */
-#if defined(__GNUC__)
+#if defined(__GNUC__) || (defined(__clang__) && !defined(_MSC_VER))
 #	define NORETURN __attribute__ ((noreturn))
 #	define CDECL
 #	define __int64 long long
@@ -134,7 +136,7 @@
 #	else
 #		define FALLTHROUGH
 #	endif
-#endif /* __GNUC__ */
+#endif /* __GNUC__ || __clang__ */
 
 #if defined(__WATCOMC__)
 #	define NORETURN
@@ -156,22 +158,12 @@
 /* Stuff for MSVC */
 #if defined(_MSC_VER)
 #	pragma once
-#	ifdef _WIN64
-		/* No 64-bit Windows below XP, so we can safely assume it as the target platform. */
-#		define NTDDI_VERSION NTDDI_WINXP // Windows XP
-#		define _WIN32_WINNT 0x501        // Windows XP
-#		define _WIN32_WINDOWS 0x501      // Windows XP
-#		define WINVER 0x0501             // Windows XP
-#		define _WIN32_IE_ 0x0600         // 6.0 (XP+)
-#	else
-		/* Define a win32 target platform, to override defaults of the SDK
-		 * We need to define NTDDI version for Vista SDK, but win2k is minimum */
-#		define NTDDI_VERSION NTDDI_WIN2K // Windows 2000
-#		define _WIN32_WINNT 0x0500       // Windows 2000
-#		define _WIN32_WINDOWS 0x400      // Windows 95
-#		define WINVER 0x0400             // Windows NT 4.0 / Windows 95
-#		define _WIN32_IE_ 0x0401         // 4.01 (win98 and NT4SP5+)
-#	endif
+#	define NTDDI_VERSION NTDDI_WINXP // Windows XP
+#	define _WIN32_WINNT 0x501        // Windows XP
+#	define _WIN32_WINDOWS 0x501      // Windows XP
+#	define WINVER 0x0501             // Windows XP
+#	define _WIN32_IE_ 0x0600         // 6.0 (XP+)
+
 #	define NOMINMAX                // Disable min/max macros in windows.h.
 
 #	pragma warning(disable: 4244)  // 'conversion' conversion from 'type1' to 'type2', possible loss of data
@@ -204,14 +196,10 @@
 
 #	define CDECL _cdecl
 #	define WARN_FORMAT(string, args)
-#	ifndef __clang__
-#		define FINAL sealed
-#	else
-#		define FINAL
-#	endif
+#	define FINAL final
 
 	/* fallthrough attribute, VS 2017 */
-#	if (_MSC_VER >= 1910)
+#	if (_MSC_VER >= 1910) || defined(__clang__)
 #		define FALLTHROUGH [[fallthrough]]
 #	else
 #		define FALLTHROUGH
@@ -261,25 +249,26 @@
 
 #endif /* defined(_MSC_VER) */
 
-/* NOTE: the string returned by these functions is only valid until the next
- * call to the same function and is not thread- or reentrancy-safe */
 #if !defined(STRGEN) && !defined(SETTINGSGEN)
 #	if defined(_WIN32)
 		char *getcwd(char *buf, size_t size);
-#		include <tchar.h>
 #		include <io.h>
+#		include <tchar.h>
 
-		namespace std { using ::_tfopen; }
-#		define fopen(file, mode) _tfopen(OTTD2FS(file), _T(mode))
-#		define unlink(file) _tunlink(OTTD2FS(file))
+#		define fopen(file, mode) _wfopen(OTTD2FS(file).c_str(), _T(mode))
+#		define unlink(file) _wunlink(OTTD2FS(file).c_str())
 
-		const char *FS2OTTD(const TCHAR *name);
-		const TCHAR *OTTD2FS(const char *name, bool console_cp = false);
+		std::string FS2OTTD(const std::wstring &name);
+		std::wstring OTTD2FS(const std::string &name);
+#	elif defined(WITH_ICONV)
+#		define fopen(file, mode) fopen(OTTD2FS(file).c_str(), mode)
+		std::string FS2OTTD(const std::string &name);
+		std::string OTTD2FS(const std::string &name);
 #	else
-#		define fopen(file, mode) fopen(OTTD2FS(file), mode)
-		const char *FS2OTTD(const char *name);
-		const char *OTTD2FS(const char *name);
-#	endif /* _WIN32 */
+		// no override of fopen() since no transformation is required of the filename
+		template <typename T> std::string FS2OTTD(T name) { return name; }
+		template <typename T> std::string OTTD2FS(T name) { return name; }
+#	endif /* _WIN32 or WITH_ICONV */
 #endif /* STRGEN || SETTINGSGEN */
 
 #if defined(_WIN32) || defined(__OS2__) && !defined(__INNOTEK_LIBC__)
@@ -315,8 +304,8 @@
 
 typedef unsigned char byte;
 
-/* This is already defined in unix, but not in QNX Neutrino (6.x)*/
-#if (!defined(UNIX) && !defined(__HAIKU__)) || defined(__QNXNTO__)
+/* This is already defined in unix, but not in QNX Neutrino (6.x) or Cygwin. */
+#if (!defined(UNIX) && !defined(__HAIKU__)) || defined(__QNXNTO__) || defined(__CYGWIN__)
 	typedef unsigned int uint;
 #endif
 
@@ -348,27 +337,17 @@ typedef unsigned char byte;
 #	define PERSONAL_DIR ""
 #endif
 
-/* Compile time assertions. Prefer c++0x static_assert().
- * Older compilers cannot evaluate some expressions at compile time,
- * typically when templates are involved, try assert_tcompile() in those cases. */
-#if __cplusplus >= 201103L || (defined(_MSC_VER) && _MSC_VER >= 1600)
-#	define assert_compile(expr) static_assert(expr, #expr )
-#	define assert_tcompile(expr) assert_compile(expr)
-#elif defined(__OS2__)
-	/* Disabled for OS/2 */
-#	define assert_compile(expr)
-#	define assert_tcompile(expr) assert_compile(expr)
-#else
-#	define assert_compile(expr) typedef int __ct_assert__[1 - 2 * !(expr)]
-#	define assert_tcompile(expr) assert(expr)
+/* Define the the platforms that use XDG */
+#if defined(WITH_PERSONAL_DIR) && defined(UNIX) && !defined(__APPLE__)
+#	define USE_XDG
 #endif
 
 /* Check if the types have the bitsizes like we are using them */
-assert_compile(sizeof(uint64) == 8);
-assert_compile(sizeof(uint32) == 4);
-assert_compile(sizeof(uint16) == 2);
-assert_compile(sizeof(uint8)  == 1);
-assert_compile(SIZE_MAX >= UINT32_MAX);
+static_assert(sizeof(uint64) == 8);
+static_assert(sizeof(uint32) == 4);
+static_assert(sizeof(uint16) == 2);
+static_assert(sizeof(uint8)  == 1);
+static_assert(SIZE_MAX >= UINT32_MAX);
 
 #ifndef M_PI_2
 #define M_PI_2 1.57079632679489661923
@@ -401,18 +380,13 @@ assert_compile(SIZE_MAX >= UINT32_MAX);
  */
 #define lastof(x) (&x[lengthof(x) - 1])
 
-#define cpp_offsetof(s, m)   (((size_t)&reinterpret_cast<const volatile char&>((((s*)(char*)8)->m))) - 8)
-#if !defined(offsetof)
-#	define offsetof(s, m) cpp_offsetof(s, m)
-#endif /* offsetof */
-
 /**
  * Gets the size of a variable within a class.
  * @param base     The class the variable is in.
  * @param variable The variable to get the size of.
  * @return the size of the variable
  */
-#define cpp_sizeof(base, variable) (sizeof(((base*)8)->variable))
+#define cpp_sizeof(base, variable) (sizeof(std::declval<base>().variable))
 
 /**
  * Gets the length of an array variable within a class.
@@ -430,6 +404,14 @@ assert_compile(SIZE_MAX >= UINT32_MAX);
 #	define CloseConnection OTTD_CloseConnection
 #endif /* __APPLE__ */
 
+#if defined(__GNUC__) || defined(__clang__)
+#	define likely(x)   __builtin_expect(!!(x), 1)
+#	define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+#	define likely(x)   (x)
+#	define unlikely(x) (x)
+#endif /* __GNUC__ || __clang__ */
+
 void NORETURN CDECL usererror(const char *str, ...) WARN_FORMAT(1, 2);
 void NORETURN CDECL error(const char *str, ...) WARN_FORMAT(1, 2);
 #define NOT_REACHED() error("NOT_REACHED triggered at line %i of %s", __LINE__, __FILE__)
@@ -437,12 +419,15 @@ void NORETURN CDECL error(const char *str, ...) WARN_FORMAT(1, 2);
 /* For non-debug builds with assertions enabled use the special assertion handler. */
 #if defined(NDEBUG) && defined(WITH_ASSERT)
 #	undef assert
-#	define assert(expression) if (!(expression)) error("Assertion failed at line %i of %s: %s", __LINE__, __FILE__, #expression);
+#	define assert(expression) if (unlikely(!(expression))) error("Assertion failed at line %i of %s: %s", __LINE__, __FILE__, #expression);
 #endif
 
 /* Asserts are enabled if NDEBUG isn't defined or WITH_ASSERT is defined. */
 #if !defined(NDEBUG) || defined(WITH_ASSERT)
 #	define OTTD_ASSERT
+#	define assert_msg(expression, msg, ...) if (unlikely(!(expression))) error("Assertion failed at line %i of %s: %s\n\t" msg, __LINE__, __FILE__, #expression, __VA_ARGS__);
+#else
+#	define assert_msg(expression, msg, ...)
 #endif
 
 #if defined(OPENBSD)

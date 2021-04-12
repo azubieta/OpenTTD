@@ -12,7 +12,7 @@
 
 #include "fileio_type.h"
 #include <string>
-#include "3rdparty/optional/ottd_optional.h"
+#include <optional>
 
 /** Types of groups */
 enum IniGroupType {
@@ -25,7 +25,7 @@ enum IniGroupType {
 struct IniItem {
 	IniItem *next;                    ///< The next item in this group
 	std::string name;                 ///< The name of this item
-	opt::optional<std::string> value; ///< The value of this item
+	std::optional<std::string> value; ///< The value of this item
 	std::string comment;              ///< The comment associated with this item
 
 	IniItem(struct IniGroup *parent, const std::string &name);
@@ -64,7 +64,7 @@ struct IniLoadFile {
 	IniGroup *GetGroup(const std::string &name, bool create_new = true);
 	void RemoveGroup(const char *name);
 
-	void LoadFromDisk(const char *filename, Subdirectory subdir);
+	void LoadFromDisk(const std::string &filename, Subdirectory subdir);
 
 	/**
 	 * Open the INI file.
@@ -73,7 +73,7 @@ struct IniLoadFile {
 	 * @param[out] size Size of the opened file.
 	 * @return File handle of the opened file, or \c nullptr.
 	 */
-	virtual FILE *OpenFile(const char *filename, Subdirectory subdir, size_t *size) = 0;
+	virtual FILE *OpenFile(const std::string &filename, Subdirectory subdir, size_t *size) = 0;
 
 	/**
 	 * Report an error about the file contents.
@@ -88,9 +88,9 @@ struct IniLoadFile {
 struct IniFile : IniLoadFile {
 	IniFile(const char * const *list_group_names = nullptr);
 
-	bool SaveToDisk(const char *filename);
+	bool SaveToDisk(const std::string &filename);
 
-	virtual FILE *OpenFile(const char *filename, Subdirectory subdir, size_t *size);
+	virtual FILE *OpenFile(const std::string &filename, Subdirectory subdir, size_t *size);
 	virtual void ReportFileError(const char * const pre, const char * const buffer, const char * const post);
 };
 

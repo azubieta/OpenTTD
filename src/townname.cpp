@@ -505,7 +505,7 @@ static char *MakeFinnishTownName(char *buf, const char *last, uint32 seed)
 				strstr(orig, "A") != nullptr || strstr(orig, "O") != nullptr || strstr(orig, "U")  != nullptr) {
 			buf = strecpy(buf, "la", last);
 		} else {
-			buf = strecpy(buf, "l\xC3\xA4", last);
+			buf = strecpy(buf, u8"l\u00e4", last);
 		}
 		return buf;
 	}
@@ -600,7 +600,9 @@ static char *MakeCzechTownName(char *buf, const char *last, uint32 seed)
 		return strecpy(buf, _name_czech_real[SeedModChance(4, lengthof(_name_czech_real), seed)], last);
 	}
 
+#ifdef WITH_ASSERT
 	const char *orig = buf;
+#endif
 
 	/* Probability of prefixes/suffixes
 	 * 0..11 prefix, 12..13 prefix+suffix, 14..17 suffix, 18..31 nothing */
